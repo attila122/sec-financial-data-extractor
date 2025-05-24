@@ -248,11 +248,9 @@ def create_financial_charts(summary_df):
             yaxis_title=f'{metric} (USD)',
             hovermode='x unified',
             template='plotly_white',
-            height=400
+            height=400,
+            yaxis=dict(tickformat='$,.0f')  # Fixed: moved tickformat into yaxis dict
         )
-        
-        # Format y-axis for better readability
-        fig.update_yaxis(tickformat='$,.0f')
         
         charts[metric] = fig
     
@@ -351,19 +349,23 @@ def main():
             st.subheader("Financial Summary Table")
             
             # Create pivot table for better display
-            pivot_df = st.session_state.combined_summary.pivot_table(
-                index=['Company', 'Metric'],
-                columns='Fiscal Year',
-                values='Value',
-                aggfunc='first'
-            ).reset_index()
-            
-            # Format numbers
-            numeric_columns = pivot_df.select_dtypes(include=['number']).columns
-            for col in numeric_columns:
-                pivot_df[col] = pivot_df[col].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "N/A")
-            
-            st.dataframe(pivot_df, use_container_width=True)
+            try:
+                pivot_df = st.session_state.combined_summary.pivot_table(
+                    index=['Company', 'Metric'],
+                    columns='Fiscal Year',
+                    values='Value',
+                    aggfunc='first'
+                ).reset_index()
+                
+                # Format numbers
+                numeric_columns = pivot_df.select_dtypes(include=['number']).columns
+                for col in numeric_columns:
+                    pivot_df[col] = pivot_df[col].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "N/A")
+                
+                st.dataframe(pivot_df, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error creating pivot table: {e}")
+                st.dataframe(st.session_state.combined_summary, use_container_width=True)
         
         with tab3:
             st.subheader("Download Data")
@@ -384,17 +386,29 @@ def main():
             
             with col2:
                 # Download summary as Excel
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    st.session_state.combined_summary.to_excel(writer, index=False, sheet_name='Summary')
-                    pivot_df.to_excel(writer, index=False, sheet_name='Pivot_Table')
-                
-                st.download_button(
-                    label="📊 Download Excel Report",
-                    data=excel_buffer.getvalue(),
-                    file_name=f"financial_report_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+                try:
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        st.session_state.combined_summary.to_excel(writer, index=False, sheet_name='Summary')
+                        try:
+                            pivot_df = st.session_state.combined_summary.pivot_table(
+                                index=['Company', 'Metric'],
+                                columns='Fiscal Year',
+                                values='Value',
+                                aggfunc='first'
+                            ).reset_index()
+                            pivot_df.to_excel(writer, index=False, sheet_name='Pivot_Table')
+                        except:
+                            pass  # Skip pivot table if it fails
+                    
+                    st.download_button(
+                        label="📊 Download Excel Report",
+                        data=excel_buffer.getvalue(),
+                        file_name=f"financial_report_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as e:
+                    st.error(f"Excel export not available: {e}")
         
         with tab4:
             st.subheader("Detailed Financial Data")
@@ -420,8 +434,11 @@ def main():
                     
                     st.markdown(f"#### {metric}")
                     
-                    cols = st.columns(len(metric_data))
-                    for i, (_, row) in enumerate(metric_data.iterrows()):
+                    # Handle case where there might be more columns than available space
+                    max_cols = min(len(metric_data), 5)  # Limit to 5 columns max
+                    cols = st.columns(max_cols)
+                    
+                    for i, (_, row) in enumerate(metric_data.head(max_cols).iterrows()):
                         with cols[i]:
                             value = f"${row['Value']:,.0f}" if pd.notnull(row['Value']) else "N/A"
                             st.metric(
